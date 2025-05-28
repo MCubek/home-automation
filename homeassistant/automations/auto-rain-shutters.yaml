@@ -1,81 +1,65 @@
 alias: Rain-protected shutters
 description: >-
-  When sensor.openweathermap_weather changes into rain/storm/shower 
-  (excluding exactly "light rain"), save & close all shutters with a 
-  matching input_number helper.  When it leaves those states 
-  (including to "light rain"), restore positions.
-trigger:
-  - platform: state
-    entity_id: sensor.openweathermap_weather
-
-action:
+  When weather.openweathermap reports rain, save and close selected shutters.
+  When rain ends, restore them to their previous positions.
+triggers:
+  - entity_id: sensor.openweathermap_weather
+    trigger: state
+actions:
   - choose:
-      # ─── 1) Enter rain/storm/shower (≠ light rain) ───
       - conditions:
           - condition: template
-            value_template: >
+            value_template: |
               {{ trigger.to_state.state | lower 
-                 is match("(?i)^(?!light rain$).*(rain|storm|shower).*") }}
+                is match("^(?!light rain$).*(rain|storm|shower).*") }}
         sequence:
-          # 1a) Save each shutter’s current_position into its helper
           - repeat:
-              for_each: >
+              for_each: |
                 {{ states.input_number
-                   | map(attribute='entity_id')
-                   | select('match',
-                            '^input_number\\..*_shutter_last_position$')
+                   | map(attribute="entity_id")
+                   | select("match", "^input_number\\..*_shutters_last_position$")
                    | list }}
               sequence:
-                - service: input_number.set_value
-                  data:
+                - data:
                     entity_id: "{{ repeat.item }}"
-                    value: >
+                    value: |
                       {{ state_attr(
                           'cover.' ~
                           repeat.item.split('.')[1]
                                      .replace('_last_position',''),
                           'current_position'
                         ) }}
-          # 1b) Close them all
-          - service: cover.close_cover
-            target:
-              entity_id: >
+                  action: input_number.set_value
+          - target:
+              entity_id: |
                 {{ states.input_number
-                   | map(attribute='entity_id')
-                   | select('match',
-                            '^input_number\\..*_shutter_last_position$')
-                   | map('regex_replace',
-                        '^input_number\\.(.*)_last_position$',
-                        'cover.\\1')
+                   | map(attribute="entity_id")
+                   | select("match", "^input_number\\..*_shutters_last_position$")
+                   | map("regex_replace",
+                        "^input_number\\.(.*)_last_position$",
+                        "cover.\\1")
                    | list }}
-
-      # ─── 2) Leave rain/storm/shower ───
+            action: cover.close_cover
       - conditions:
           - condition: template
-            value_template: >
+            value_template: |
               {{ 
-                trigger.from_state.state | lower 
-                  is match("(?i)^(?!light rain$).*(rain|storm|shower).*")
-                and
-                trigger.to_state.state | lower 
-                  is not match("(?i)^(?!light rain$).*(rain|storm|shower).*")
+                trigger.from_state.state | lower is match("^(?!light rain$).*(rain|storm).*")
+                and trigger.to_state.state |lower is not match("^(?!light rain$).*(rain|storm).*")
               }}
         sequence:
-          # Restore saved positions (this covers heavy → light rain)
           - repeat:
-              for_each: >
+              for_each: |
                 {{ states.input_number
-                   | map(attribute='entity_id')
-                   | select('match',
-                            '^input_number\\..*_shutter_last_position$')
+                   | map(attribute="entity_id")
+                   | select("match", "^input_number\\..*_shutters_last_position$")
                    | list }}
               sequence:
-                - service: cover.set_cover_position
-                  data:
-                    entity_id: >
+                - data:
+                    entity_id: |
                       {{ 'cover.' ~
                          repeat.item.split('.')[1]
                                     .replace('_last_position','') }}
                     position: "{{ states(repeat.item)|int }}"
-
+                  action: cover.set_cover_position
 mode: single
